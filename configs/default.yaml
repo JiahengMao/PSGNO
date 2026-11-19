@@ -1,0 +1,85 @@
+# PSGNO default configuration
+
+seed: 42
+device: cuda            # cuda | cpu
+
+data:
+  path: data/example.npy   # (N, T, H, W, C) numpy array
+  source_ratio: 0.8        # fraction of trajectories used as the source domain
+  t_in: 10                 # input history length, Table 5
+  horizon: 3               # predicted frames, Table 5
+  stride: 5                # sliding-window stride, Table 5
+  # Extra physical quantities read from the same .npz archive and passed to the
+  # residual operator; the trajectory array must then be stored under "data".
+  # For the incompressible case use the body force:
+  #   aux_keys: [forcing]
+  # The shallow-water bathymetry is read as ``bathymetry``.
+  aux_keys: []
+
+model:
+  in_channels: 2
+  out_channels: 2
+  width: 64
+  modes1: 12               # retained Fourier modes, Appendix C
+  modes2: 12
+  fno_layers: 4
+  d_model: 64
+  st_layers: 2
+  heads: 4
+  horizon: 3
+  unet_base: 32
+  max_len: 256
+  dropout: 0.0
+  use_pisg: true
+  # Residual operator used by PISG and L_p (Eqs. 9 and 18).
+  # One of: swe | dr | ins | cns | cfdbench
+  residual: ins
+  residual_params:
+    nu: 0.01               # kinematic viscosity of the case
+    dt: 1.0                # physical time step between stored frames
+
+noise:
+  sigma_mean: -2.5         # lambda ~ LogNormal(mu, s^2), Eq. (1); standard protocol, Sec. 4.2
+  sigma_std: 0.5
+  length_low: 2.0          # l ~ U(l_lo, l_hi), Eq. (2)
+  length_high: 16.0
+  gamma: 2.0               # I(x) = 1 + gamma |grad u| / max|grad u|, Eq. (4)
+  rho: 0.95                # AR(1) coefficient, Eq. (3)
+
+pretrain:
+  epochs: 500
+  batch_size: 8
+  accum_steps: 2           # effective batch size 16, Appendix C
+  lr_denoiser: 1.0e-4      # 20% decay every 100 epochs, Sec. 4.1
+  lr_denoiser_gamma: 0.8
+  lr_predictor: 5.0e-4     # 50-epoch warm-up, then 10% decay every 100 epochs
+  lr_predictor_gamma: 0.9
+  warmup_epochs: 50
+  step_size: 100
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  lambda_denoise: 1.0
+  lambda_predict: 1.0
+  patience: 15             # early stopping on the validation loss
+  num_workers: 0
+  amp: false               # mixed precision; disabled by default for exact reproduction
+  save_dir: checkpoints/pretrain
+
+finetune:
+  epochs: 100
+  batch_size: 8
+  accum_steps: 2           # effective batch size 16, Appendix C
+  lr: 1.0e-5               # 10% decay every 50 epochs, Sec. 4.1
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  lora_rank: 16            # d_r = 16, Appendix C
+  lora_alpha: 1.0
+  lambda_consistency: 0.01
+  lambda_physics: 0.01
+  h_c: 3                   # H_c = H for H >= 2, Eq. (17)
+  step_size: 50
+  gamma_lr: 0.9
+  patience: 15             # early stopping on the validation loss
+  num_workers: 0
+  init_checkpoint: checkpoints/pretrain/best.pt
+  save_dir: checkpoints/finetune
